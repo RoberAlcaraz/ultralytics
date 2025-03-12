@@ -671,10 +671,11 @@ def crop_mask(masks, boxes):
 
     return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
 
-
-def process_mask(protos, masks_in, bboxes, shape, upsample=False):
+def process_mask(
+    protos, masks_in, bboxes, shape, upsample=False, expansion_factor=0.05
+):
     """
-    Apply masks to bounding boxes using the output of the mask head.
+    Apply masks to bounding boxes using the output of the mask head, with expanded bounding boxes.
 
     Args:
         protos (torch.Tensor): A tensor of shape [mask_dim, mask_h, mask_w].
@@ -682,10 +683,10 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
         bboxes (torch.Tensor): A tensor of shape [n, 4], where n is the number of masks after NMS.
         shape (tuple): A tuple of integers representing the size of the input image in the format (h, w).
         upsample (bool): A flag to indicate whether to upsample the mask to the original image size. Default is False.
+        expansion_factor (float): Factor to expand the bounding boxes. Default is 5% (0.05).
 
     Returns:
-        (torch.Tensor): A binary mask tensor of shape [n, h, w], where n is the number of masks after NMS, and h and w
-            are the height and width of the input image. The mask is applied to the bounding boxes.
+        (torch.Tensor): A binary mask tensor of shape [n, h, w], where n is the number of masks after NMS.
     """
     c, mh, mw = protos.shape  # CHW
     ih, iw = shape
@@ -699,9 +700,19 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     downsampled_bboxes[:, 3] *= height_ratio
     downsampled_bboxes[:, 1] *= height_ratio
 
-    masks = crop_mask(masks, downsampled_bboxes)  # CHW
+    # Expand bounding boxes by the expansion factor
+    bbox_width = downsampled_bboxes[:, 2] - downsampled_bboxes[:, 0]
+    bbox_height = downsampled_bboxes[:, 3] - downsampled_bboxes[:, 1]
+    downsampled_bboxes[:, 0] -= bbox_width * expansion_factor
+    downsampled_bboxes[:, 1] -= bbox_height * expansion_factor
+    downsampled_bboxes[:, 2] += bbox_width * expansion_factor
+    downsampled_bboxes[:, 3] += bbox_height * expansion_factor
+
+    masks = crop_mask(masks, downsampled_bboxes)  # Apply expanded bounding boxes
     if upsample:
-        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[0]  # CHW
+        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[
+            0
+        ]  # CHW
     return masks.gt_(0.0)
 
 
